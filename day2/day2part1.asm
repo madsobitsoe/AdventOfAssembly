@@ -33,13 +33,6 @@ readfile:
         mov r10, 2              ; MAP_PRIVATE
         xor r9, r9              ;no offset!
         syscall                 ; map the file and pray!
-
-        ;; ;; We need space for the integers on the stack afterwards anyway
-        ;; mov rax, 0              ; syscall for read
-        ;; mov rdi, r11            ; filedescriptor goes in rdi
-        ;; mov rsi, rsp            ; write to the stack
-        ;; mov rdx, 1024            ; Read up to 1024 bytes
-        ;; syscall
         mov r12, rax            ;save address of mem-location
 
 closefile:
@@ -162,6 +155,12 @@ closefile:
 ;;         mov rdx, 1
 ;;         mov rax, 1
 ;;         syscall
+
+unmapMem:
+        mov rax, 11             ; syscall for munmap
+        mov rdi, r12            ; address of memory
+        mov rsi, 20694          ;We used 20694 bytes to store the file
+        syscall                 ;unmap the mem-location
 exit:
         mov     rax, 60         ; syscall for exit
         mov     rdi, 0          ; return value
