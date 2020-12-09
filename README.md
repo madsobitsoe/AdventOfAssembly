@@ -23,6 +23,12 @@ Kindof terrible solution.
 - print result
 - exit
 
+### Part2 tiny
+Use handcrafted (i.e. copy/pasted) elf-64 header and binary output from nasm to
+avoid overhead and useless cruft.
+Makes the binary become 475 bytes instead of 5544 bytes (in the stripped version).
+
+
 ## Day 2
 Not a solution yet
 ### Part 1
