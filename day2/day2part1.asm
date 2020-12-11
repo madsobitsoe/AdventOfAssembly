@@ -6,39 +6,187 @@ _start:
         mov r9, 1
         pop rdi               ; put no. of arguments in rdi
         cmp rdi, r9           ; Were there 1 argument only, i.e. the program name?
-        je exit               ; if there were no args, exit
-        pop rsi               ; else pop arg-pointer into rsi
-        pop rsi               ; twice so we get to the actual file supplied
-        mov r10, rsp          ; store stack pointer
+        je exitSuccess               ; if there were no args, exit
+        pop rax               ; else pop arg-pointer into rax
+        pop rax               ; twice so we get to the actual file supplied
+        ;; mov r10, rsp          ; store stack pointer
+        ;; Attempt to open the supplied file
+        call openFile
+        ;; Read it into memory
+        mov rcx, 20694          ;no. of bytes needed
+        push rcx                ;store num on stack for later
+        push rax                ;store the fd on stack for later
+        call readFileIntoMemory
+        xchg rax, rcx           ; move addr into rcx
 
-openfile:
-        mov rax, 2              ;syscall for open
-        mov rdi, rsi            ; pointer to filename goes in rdi
+        pop rax                 ; put fd in rax
+        ;; Store addr on stack
+        push rcx
+        ;; close the file
+        call closeFile
+        ;; Unmap the memory
+        ;; xchg rax,rcx            ;*addr in rax
+        ;; pop rcx
+        pop rax                 ; * addr
+        pop rcx                 ; num of bytes
+        ;; mov rcx, 20694          ;no. of bytes to unmap
+        call unmapMem
+        call exitSuccess
 
-        xor rsi,rsi             ; Readonly mode
 
+unmapMem:
+        ;; precond for unmapMem
+        ;; address should be in rax
+        ;; length/space of memory should be in rcx
+        ;; Postcond: on success, mem is unmapped
+        ;; on error, exits with errno from syscall
+        ;; Remarks - uses syscall, so rax, rdi, rsi, r8, r9, r10 might be overwritten
+        mov rdi, 11             ;syscall no for munmap
+        xchg rax,rdi            ; *addr in rdi,syscall no. in rax
+        mov rsi,rcx             ; num of bytes to unmap
+        syscall                 ; unmap the mem-location
+        cmp rax, 0              ; Error checking
+        jne exitError
+        ret                     ; Return from routine
+
+
+
+openFile:
+        ;; Precond for openfile
+        ;; pointer to filename should be in rax
+        ;; Postcond: Filedescriptor will be returned in rax
+        ;; Remarks
+        ;; Only readonly flag is set (NO WRITING YET!)
+        ;; No mode is set (I don't need that yet)
+        ;; Uses syscall, so rax, rsi, rdi, r8, r9, r10 might be overwritten
+        mov rdi, rax            ; pointer to filename goes in rdi
+        mov rax, 2              ; syscall for open
+        xor rsi,rsi             ; Set Readonly-mode-flag
         xor rdx,rdx             ; Cancel the mode
         syscall
-        push rax            ; save the filedescriptor
+        ;; Handle errors!
+        cmp rax, 0
+        jl exitError           ;Something went wrong. Exit gracefully with errno
+        ret                     ; return to calling function (lol, label). fd is in rax
 
-readfile:
-                                ; input file is 20694 bytes. Damn, we need more than stackspace :(
 
-        ;; First, mmap at least 20694 bytes to store the file
-        xchg rax, r8            ;put fd in r8
-        mov rax, 9              ; syscall for mmap
+
+readFileIntoMemory:
+        ;; Preconds
+        ;; fd to open should be in rax
+        ;; no. of bytes to allocate should be in rcx
+        ;; postconds
+        ;; On success, address is returned in rax
+        ;; on error, exits with errno from syscall
+        ;; remarks:
+        ;; Overwrites rax,rdi,rdx, r8,r9,r10
+        ;; Reserves memory in readonly mode
+        ;; Mem is backed by a file
+        mov r8, 9               ;syscall for mmap
+        xchg rax, r8            ;put fd in r8, syscall num in rax
+        mov rsi, rcx            ; no. of bytes needed
         xor rdi,rdi             ;we don't care where the memory is. let the kernel decide
-        mov rsi, 20694          ;We need 20694 bytes to store the file
+        ;; mov rsi, 20694          ;We need 20694 bytes to store the file
         mov rdx, 1              ; PROT_READ  - no need to overwrite the file
         mov r10, 2              ; MAP_PRIVATE
-        xor r9, r9              ;no offset!
+        xor r9, r9              ; no offset!
         syscall                 ; map the file and pray!
-        mov r12, rax            ;save address of mem-location
+        cmp rax, 0              ; check for errors
+        jl exitError            ; exit with errno from syscal
+        ret
 
-closefile:
-        mov rax,3               ; syscall for close
-        pop rdi            ; fd is in r11, mov into rdi
+;; readfile:
+;;                                 ; input file is 20694 bytes. Damn, we need more than stackspace :(
+
+;;         ;; First, mmap at least 20694 bytes to store the file
+;;         xchg rax, r8            ;put fd in r8
+;;         mov rax, 9              ; syscall for mmap
+;;         xor rdi,rdi             ;we don't care where the memory is. let the kernel decide
+;;         mov rsi, 20694          ;We need 20694 bytes to store the file
+;;         mov rdx, 1              ; PROT_READ  - no need to overwrite the file
+;;         mov r10, 2              ; MAP_PRIVATE
+;;         xor r9, r9              ;no offset!
+;;         syscall                 ; map the file and pray!
+;;         mov r12, rax            ;save address of mem-location
+
+
+
+
+
+
+
+
+;; readfile:
+;;                                 ; input file is 20694 bytes. Damn, we need more than stackspace :(
+
+;;         ;; First, mmap at least 20694 bytes to store the file
+;;         xchg rax, r8            ;put fd in r8
+;;         mov rax, 9              ; syscall for mmap
+;;         xor rdi,rdi             ;we don't care where the memory is. let the kernel decide
+;;         mov rsi, 20694          ;We need 20694 bytes to store the file
+;;         mov rdx, 1              ; PROT_READ  - no need to overwrite the file
+;;         mov r10, 2              ; MAP_PRIVATE
+;;         xor r9, r9              ;no offset!
+;;         syscall                 ; map the file and pray!
+;;         mov r12, rax            ;save address of mem-location
+
+
+
+closeFile:
+        ;; Preconds:
+        ;; fd should be in rax
+        ;; postcond:
+        ;; fd is closed
+        ;; remarks:
+        ;; Potentially overwrites rax,rdi,rdx,r8,r9,r10
+        mov rdi, 3              ;syscall for close
+        xchg rax,rdi            ; put fd in rdi, syscall no. in rax
         syscall
+        cmp rax,0               ;Check for errors
+        jl exitError            ;exit with errno from syscall if error
+        ret                     ; else, return
+
+
+        ;; Now, parse the file, line by line
+        ;; Format is
+        ;; 7-9 l: vslmtglbc
+;; parseAndValidateLine:
+;;         ;; read number until '-' encountered: ascii 0x2d / 45 decimal
+;;         ;; Number is min-count - can be multi-digit
+;; parseNumber:
+;;         ;; Remarks: Will overwrite rdi, rsi, rax
+;;         ;; precond for parseNumber
+;;         ;; pointer to next byte to read should be in rdi
+;;         ;; post-cond for parseNumber
+;;         ;; pointer to next byte should in rdi
+;;         ;; resulting number should be in rax
+;;         xor rax,rax             ;clear out rax
+;; parseNumberLoop:
+;;         ;; pop rdi    ;pop pointer into rdi
+;;         ;; Now, read a single byte into rsi
+;;         xor rsi,rsi             ;clear out rsi
+;;         mov sil, [rdi]          ;read a byte
+;;         inc rdi                 ;inc pointer to next byte to read
+;;         cmp sil, 0x20           ;Was this a space?
+;;         je parseNumberDone
+;;         ;; If not a space, ensure this is in ascii-digit range 48-57
+;;         cmp sil, 48
+;;         jl parseNumberError
+;;         sub
+;; parseNumberError:
+;;         ;; Something went wrong while parsing.
+
+
+;; parseNumberDone:
+;;         ret                     ; return
+        ;; read number until ' ' encountered: ascii 0x20 / 32 decimal
+        ;; Number is max-count - can be multi-digit
+        ;; read one char (the byte to compare with when validating password
+        ;; read ':' : ascii value 0x3a / 58 decimal
+        ;; read ' ' : ascii value 0x20 / 32 decimal
+        ;; read chars until '\n' encountered. 0xa / 10 decimal
+        ;; chars are the password
+
 
 ;; convertLines:
 ;;         mov r13, 10        ;; store a newline for easy comparison (and multiplication)
@@ -156,12 +304,15 @@ closefile:
 ;;         mov rax, 1
 ;;         syscall
 
-unmapMem:
-        mov rax, 11             ; syscall for munmap
-        mov rdi, r12            ; address of memory
-        mov rsi, 20694          ;We used 20694 bytes to store the file
-        syscall                 ;unmap the mem-location
+exitError:
+        mov rdi, rax            ;errno is in rax
+        neg rdi                 ;negate it to get an actual errcode
+        and rdi,4096            ;and it with 4096 to get proper errcode
+        mov rdi,42
+        jmp exit
+
+exitSuccess:
+        mov rdi,0; return value for exit syscall
 exit:
         mov     rax, 60         ; syscall for exit
-        mov     rdi, 0          ; return value
         syscall                 ; exit successfully
