@@ -35,31 +35,37 @@ The challenge: https://adventofcode.com/2020/day/2
 
 
 I could reuse a few pieces of code from day1.
-I decided to write proper procedures, to make it much easier to reuse in the following days. The code now uses call and ret all over the place, and stack manipulation becomes a bit harder.
-Overall it makes the program much easier to read (and write and maintain!) and the code in the _start label is almost human readable. Wonderful!
+I decided to write proper procedures, to make it easier to reuse in the following days. 
+The code now uses `call` and `ret` all over the place, so stack manipulation becomes a bit harder. 
+Overall it makes the program much easier to read (and write and maintain!). 
+the code in the `_start` label is almost human readable. Wonderful!
 
-The biggest new challenges (as opposed to day 1):
+The biggest new challenges (as opposed to day 1): 
 - The input data is 20k bytes. This needs to be read into memory, not just the stack.
 - The input data needs to be parsed, so the pieces of it can be used.
 A line in the input data is of the format:
+
 `[0-9]-[0-9] [a-z]: [a-z]+\n`
 or
-N-M C: P+
+`N-M C: P+`
 where
-N and M are integers
-C is a char
-P+ is a password, i.e. one or more chars.
+- N and M are integers  
+- C is a char  
+- P+ is a password, i.e. one or more chars.  
 
 For reading in the data, I:
 - use open to get a file-descriptor (duh)
 - use fstat to find the filesize
 - use mmap to map the file in memory and get a pointer to it
 
-Mapping memory also means unmapping memory when I'm done using it - (and in case of errors). The error-handling is not at the state where it should be, but in some cases it works.
+Mapping memory also means unmapping memory when I'm done using it - (and in case of errors). 
+The error-handling is not at the state where it should be, but in some cases it works.
+The code has been designed towards and only been tested with the given data from the challenge. I didn't spend time making testdata that would cause errors.
 
-When the data is read, I need to parse it.
+When the data is read, I need to parse it.  
 I parse it line by line.
-I make a `readUntil` routine to detect the length of the various parts. The result is used for actual "parsing".
+I made a `readUntil` routine to detect the length of the various parts. 
+The return value is used for actual "parsing".
 Integers are converted using a routine based on the conversion from day 1 - but now storing results in memory and having an actual API.
 Strings are not converted - the length and address of them is stored in the struct instead. No need for copying if I know where they begin and end.
 While parsing a line, the result of parsing is written to a 12 byte struct in the .bss section.
