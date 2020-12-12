@@ -331,27 +331,29 @@ validatePassword:
         ;; Remarks:
         ;; No input or return value
         ;; overwrites rax, rcx, rdx
+        xor rax,rax
         mov al, [ruleMem]       ; load minNum
         cmp al, [ruleMem+3]     ; if password is shorter than minNum, it is invalid
         jg validatePasswordExit
-        xor eax,eax             ; zero out rax, use for counting
-        mov cl, [ruleMem+2]     ; char to count for
-        mov rdx, [ruleMem+4]    ; address of password-string start
-validatePasswordLoopBody:
-        cmp cl, [rdx]
-        jne validatePasswordLoopCond
-validatePasswordLoopCharMatch:
-        inc eax                 ; match found, incr. count
-validatePasswordLoopCond:
-        inc rdx                 ; incr. pointer in pw-string
-        dec byte [ruleMem+3]    ; one less byte to read
-        cmp byte [ruleMem+3], 0      ; check if done
-        jg validatePasswordLoopBody
-validatePasswordFinish:
-        cmp al, [ruleMem]
-        jl validatePasswordExit ; not valid, not enough of char
-        cmp al, [ruleMem+1]
-        jg validatePasswordExit ; not valid, too many of char
+        dec al                  ; 0-index minNum
+        mov cl, [ruleMem+2]     ; char to check for
+        mov rdi, [ruleMem+4]    ; load password addr
+        xor rsi,rsi	        ; use rsi for "count of matches"
+validatePasswordCheckFirst:
+        cmp cl, [rdi + rax]
+        jne validatePasswordCheckSecond
+        inc rsi
+validatePasswordCheckSecond:
+        mov al, [ruleMem+1]     ; load maxNum
+        cmp al, [ruleMem+3]     ; if maxNum is outside of password, don't check
+        jg validatePasswordFinalCheck
+        dec al                  ; 0-index it
+        cmp cl, [rdi + rax]
+        jne validatePasswordFinalCheck
+        inc rsi
+validatePasswordFinalCheck:
+        cmp rsi, 1
+        jne validatePasswordExit
         inc word [validPasswords] ; valid password, increment count
 validatePasswordExit:
         ret
