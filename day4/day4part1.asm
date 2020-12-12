@@ -33,6 +33,12 @@ _start:
         mov rax, [fileContentsAddr]
         ;; call parseField
         ;; call matchField
+lpre:
+        call lengthOfEntry
+lpost:
+        test rax,rax
+        js exitError
+
         call parseAndValidatePassport
         call printResult
 
@@ -41,7 +47,37 @@ _start:
         call unmapMem
         call exitSuccess
 
-
+lengthOfEntry:
+        ;; an entry is of varying length, but ends with \n\n (0x0a0a)
+        ;; Find the length of an entry
+        ;; preconds: addr of start of entry in rax
+        ;; postconds: none
+        ;; returns length in rax
+        push 0                  ; counter
+lengthOfEntryLoop:
+        push rax                ;store addr
+        mov rcx, newline         ; search for a newline
+        mov rdi, 1              ; one char to compare with (0x0a)
+        call readUntil
+        test rax,rax            ; err?
+        js lengthOfEntryErr     ; then errExit
+        add [rsp+8], rax
+        xchg rax,rdx            ; len of string in rdx
+        pop rax                 ; get orig addr
+        add rax,rdx             ; update offset
+        inc rax                 ; skip the read newline
+        inc byte [rsp]               ;and update the count accordingly
+lmid:
+        cmp byte [rax],0xa           ;is the next char a newline?
+        je lengthOfEntryDone
+        jmp lengthOfEntryLoop
+lengthOfEntryErr:
+        add rsp,16
+        mov rax, -1
+        ret
+lengthOfEntryDone:
+        pop rax
+        ret
 
 
 parseAndValidatePassport:
@@ -233,6 +269,7 @@ readUntilDone:
         cmp byte [rsp], 0
         jle readUntilErr
         pop rax                 ;no of bytes read, returned in rax
+        mov qword [rsp], 0
         add rsp,8               ;realign stack before return
         ret
 
@@ -523,8 +560,8 @@ ecl:    db "ecl:"
 pid:    db "pid:"
 cid:    db "cid:"
 spaceAndNewLine:                ;for use in parsing, when getting length of field
-        db 0x20                 ;space
-        db 0x0A                 ;newline
+space:  db 0x20                 ;space
+newline db 0x0A                 ;newline
 section .bss
         ;; reserve 8 bytes for the memory address of the file we read
 fileContentsAddr:       resb 8
