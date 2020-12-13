@@ -19,10 +19,10 @@ _start:
         cmp rax, 0
         jl exitError
         mov rcx, [rsp+48]       ; filesize returned from fstat-syscall
-        add rsp, 0x100           ; get rsp back to before the stat-struct was written
-        pop rax                 ;get fd
-        push rcx                ;store num on stack for later
-        push rax                ;store the fd on stack for later
+        add rsp, 0x100          ; get rsp back to before the stat-struct was written
+        pop rax                 ; get fd
+        push rcx                ; store num on stack for later
+        push rax                ; store the fd on stack for later
         call readFileIntoMemory
         cmp rax, 0
         jl exitError            ;exit if error reading file
@@ -31,15 +31,11 @@ _start:
         call closeFile         ;; close the file
 
         mov rax, [fileContentsAddr]
-        ;; call parseField
-        ;; call matchField
-lpre:
-        call lengthOfEntry
-lpost:
-        test rax,rax
-        js exitError
-
-        call parseAndValidatePassport
+        pop rcx                 ; size of data in rcx
+        push rcx
+breakme:
+        call parseAndValidatePassports
+breakme2:
         call printResult
 
         mov rax, [fileContentsAddr]
@@ -67,7 +63,6 @@ lengthOfEntryLoop:
         add rax,rdx             ; update offset
         inc rax                 ; skip the read newline
         inc byte [rsp]               ;and update the count accordingly
-lmid:
         cmp byte [rax],0xa           ;is the next char a newline?
         je lengthOfEntryDone
         jmp lengthOfEntryLoop
@@ -79,18 +74,58 @@ lengthOfEntryDone:
         pop rax
         ret
 
+parseAndValidatePassports:
+        ;; Preconds:
+        ;; addr in rax
+        ;; length of data in rcx
+        ;; postconds:
+        ;; validPasswords updated with result
+        push rax                ; store orig addr
+        push rcx                ; number of bytes to read
+parseAndValidatePassportsLoop:
+        call parseAndValidatePassport
+        test rax,rax
+        js parseAndValidatePassportsLoopDone
+        sub [rsp], rax          ; decrement amout of bytes to read by bytes read
+        dec dword [rsp]               ;skip newline separating entries
+        cmp dword [rsp], 0
+        jle parseAndValidatePassportsLoopDone
+        xchg rax, rsi
+        inc rax                 ;skip newline separating entries
+        jmp parseAndValidatePassportsLoop
+parseAndValidatePassportsLoopDone:
+        add rsp,16
+        ret
+
 
 parseAndValidatePassport:
         ;; preconds:
         ;; addr of start of passport in rax
+        ;; max number of bytes to read in rcx
         ;; postconds
-        ;; returns number of bytes read in rax
+        ;; returns number of bytes read in rax, new address in rsi
         ;; updates [validPassports] if passport is valid
+        ;;  Make sure we start with a clean set of flags for validation
 
+        mov byte [validPassport], 0
         ;; parse the first field
-        push rax                ; save addr
-        call parseField
-        pop rax                 ; restore addr
+        mov rsi, rax
+        push rcx                ; max bytes to read
+        ;; Start by getting the length of this entry
+        call lengthOfEntry
+        xchg rax,rsi            ;put length in rsi, addr back in rax
+        pop rcx
+        push rsi                ; push length
+        push rax                ;push addr
+        cmp rcx, rsi
+        jge parseAndValidatePassportLoop
+        mov rsi, rcx
+parseAndValidatePassportLoop:
+        pop rax                 ; address in rax
+        push rax                ; and back on stack
+        call parseField         ; parse the current field
+        call matchField         ; match the current field
+        pop rax                 ; restore addr in rax
         push rax                ; put back on stack
         mov rcx, spaceAndNewLine
         mov rdi, 2
@@ -98,8 +133,19 @@ parseAndValidatePassport:
         test rax,rax            ; if rax is -1 we have an error
         js exitError            ; so exit (TODO: EXIT NICELY)
         inc rax                 ; add one to offset the space
+        add [rsp], rax          ; add the offset to addr on stack
+        sub rsi, rax            ; update how much is left of this entry
+        cmp rsi, 5              ; we need AT LEAST 5 bytes left to have a field
+        jge parseAndValidatePassportLoop
+parseAndValidatePassportValidate:
+        and byte [validPassport], 127
+        cmp byte [validPassport], 127
+        jne parseAndValidatePassportDone
+        inc word [validPassports]
         ;; for now, just return to test it all
-        add rsp,8
+parseAndValidatePassportDone:
+        pop rsi
+        pop rax
         ret
 
 ;;; Needed fields:
@@ -132,110 +178,59 @@ matchField:
         ;; preconds:
         ;; field to match has been read into [currentField]
         ;; postconds:
+        ;; remarks: overwrites rax
         ;; if a match was found, the associated bit in [validPassport] is set
+        ;; mov byte [validPassport], 0
         mov eax, [byr]
         cmp dword [currentField], eax
         jne matchFieldIyr
-        or dword [validPassport], byrID
-        ret
+        or byte [validPassport], byrID
+        ret                     ;Match found, just return
 matchFieldIyr:
         mov eax, [iyr]
         cmp dword [currentField], eax
         jne matchFieldEyr
-        or dword [validPassport], iyrID
-        ret
+        or byte [validPassport], iyrID
+        ret                     ;Match found, just return
 matchFieldEyr:
         mov eax, [eyr]
         cmp dword [currentField], eax
         jne matchFieldHgt
-        or dword [validPassport], eyrID
-        ret
+        or byte [validPassport], eyrID
+        ret                     ;Match found, just return
 matchFieldHgt:
         mov eax, [hgt]
         cmp dword [currentField], eax
         jne matchFieldHcl
-        or dword [validPassport], hgtID
-        ret
+        or byte [validPassport], hgtID
+        ret                     ;Match found, just return
 matchFieldHcl:
         mov eax, [hcl]
         cmp dword [currentField], eax
         jne matchFieldEcl
-        or dword [validPassport], hclID
-        ret
+        or byte [validPassport], hclID
+        ret                     ;Match found, just return
 matchFieldEcl:
         mov eax, [ecl]
         cmp dword [currentField], eax
         jne matchFieldPid
-        or dword [validPassport], eclID
-        ret
+        or byte [validPassport], eclID
+        ret                     ;Match found, just return
 matchFieldPid:
         mov eax, [pid]
         cmp dword [currentField], eax
         jne matchFieldCid
-        or dword [validPassport], pidID
-        ret
+        or byte [validPassport], pidID
+        ret                     ;Match found, just return
 matchFieldCid:
         mov eax, [cid]
         cmp dword [currentField], eax
         jne matchFieldNoMatch
-        or dword [validPassport], cidID
-        ret
+        or byte [validPassport], cidID
+        ret                     ;Match found, just return
 matchFieldNoMatch:
         ret
-        ;;         ;; Remarks:
-;;         push 0                  ; make space on stack to store no. of bytes read
-;;         push rax                ; store address of line-beginning on stack
-;;         ;; read number until '-' encountered
-;;         mov cl, 0x2d            ;; '-' has ascii value 0x2d / 45 decimal
-;;         call readUntil
-;;         pop rcx                 ; addr
-;;         xchg rax,rcx            ; addr in rax, bytes read in rcx
-;;         ;; add rax,rcx             ; increment rax (addr) with num of bytes read
-;;         push rax                ;store new address on stack
-;;         add [rsp], rcx          ; incr. addr with number of bytes read
-;;         add [rsp+8], rcx        ; incr. no. of bytes read with number of bytes read
-;;         call asciiToInt
-;;         cmp rax, 0
-;;         jl exitError            ; if -1 just exit :(
-;;         pop rcx                 ; put addr in rcx
-;;         xchg rax,rcx            ; addr in rax, result of int in rcx
-;;         mov [ruleMem],cl        ; store result
-;;         inc rax                 ; skip the '-' byte
-;;         inc byte [rsp]        ; incr. no. of bytes read with number of bytes read
-;;         push rax                ; store (new) addr
-;;         ;; read number until ' ' encountered:
-;;         mov cl, 0x20            ; ' ' has ascii value 0x20 / 32 decimal
-;;         call readUntil
-;;         pop rcx                 ; addr
-;;         xchg rax,rcx            ; addr in rax, bytes read in rcx
-;;         push rax                ;store address on stack (again)
-;;         add [rsp], rcx            ;inc addr with no. of bytes read
-;;         add [rsp+8], rcx         ; incr. no. of bytes read with number of bytes read
-;;         call asciiToInt
-;;         cmp rax, 0
-;;         jl exitError            ; if -1 just exit :(
-;;         pop rcx                 ; put addr in rcx
-;;         xchg rax,rcx            ; addr in rax, result of int in rcx
-;;         mov [ruleMem+1],cl        ; store result
-;;         inc rax                 ; skip the ' ' byte
-;;         inc byte [rsp]        ; incr. no. of bytes read with number of bytes read
-;;         mov cl, [rax]         ;; Read a single byte - the char of the pw rule
-;;         mov byte [ruleMem+2], cl ; store it
-;;         add rax,3               ; skip until the pw starts
-;;         add byte [rsp], 3
-;;         mov [ruleMem+4], rax    ; store addr of where the pw-string starts
-;;         mov cl, 10              ; read until a newline is encountered
-;;         call readUntil
-;;         ;; How long was the string? Store that, and the address somewhere
-;;         mov byte [ruleMem+3], al
-;;         add byte [rsp], al
-;;         inc byte [rsp]
-;;         ;; If the string is less than first num, pw is invalid
-;;         ;; mov rax, ruleMem
-;;         pop rax                 ; return no. of bytes read
-;;         ret
 
-        ;; I NEED TO HAVE MULTIPLE CONDITIONS - both newline and space should be registered
 readUntil:
         ;; preconds:
         ;; addr of bytes to read in rax
@@ -306,31 +301,6 @@ cmpBytesErr:
 cmpBytesDone:
         ret
 
-;; parseAndValidatePassports:
-;;         ;;  Here, start parsing the file
-;;         ;;  So we can validate passwords
-;;         ;; returns num of valid password in rax
-;;         ;; (but that is also stored at [validPasswords])
-;;         push 20694                  ; total amount of bytes to read
-;;         mov rax, [fileContentsAddr]  ;addr in rax
-;;         push rax                     ; put addr on stack, so we can update it as we go
-;; parseAndValidatePassportsLoop:
-;;         cmp word [rsp+8], 0
-;;         jle parseAndValidatePassportsDone
-;;         mov rax, [rsp]          ;addr in rax
-;;         call parseLine
-;;         sub [rsp+8], rax          ; decrement count of bytes we need to read
-;;         add [rsp], rax            ; update address
-;;         call validatePassword
-;;         jmp parseAndValidatePassportsLoop
-;; parseAndValidatePassportsDone:
-;;         pop rax                 ;clean up stack so we can return. Don't care about result
-;;         pop rax
-;;         xor eax,eax             ; 0 out rax
-;;         mov ax,[validPassports] ; get num of valid passwords
-;;         ret
-
-
 unmapMem:
         ;; precond for unmapMem
         ;; address should be in rax
@@ -345,7 +315,6 @@ unmapMem:
         cmp rax, 0              ; Error checking
         jne exitError
         ret                     ; Return from routine
-
 
 
 openFile:
@@ -491,43 +460,6 @@ intToAsciiDone:
 
 
 
-
-;; validatePassword:
-;;         ;; Preconds
-;;         ;; rule and Password must be parsed and written to [ruleMem]
-;;         ;; postConds:
-;;         ;; increment [validPasswords] if password in [ruleMem] is valid
-;;         ;; Remarks:
-;;         ;; No input or return value
-;;         ;; overwrites rax, rcx, rdx
-;;         xor rax,rax
-;;         mov al, [ruleMem]       ; load minNum
-;;         cmp al, [ruleMem+3]     ; if password is shorter than minNum, it is invalid
-;;         jg validatePasswordExit
-;;         dec al                  ; 0-index minNum
-;;         mov cl, [ruleMem+2]     ; char to check for
-;;         mov rdi, [ruleMem+4]    ; load password addr
-;;         xor rsi,rsi	        ; use rsi for "count of matches"
-;; validatePasswordCheckFirst:
-;;         cmp cl, [rdi + rax]
-;;         jne validatePasswordCheckSecond
-;;         inc rsi
-;; validatePasswordCheckSecond:
-;;         mov al, [ruleMem+1]     ; load maxNum
-;;         cmp al, [ruleMem+3]     ; if maxNum is outside of password, don't check
-;;         jg validatePasswordFinalCheck
-;;         dec al                  ; 0-index it
-;;         cmp cl, [rdi + rax]
-;;         jne validatePasswordFinalCheck
-;;         inc rsi
-;; validatePasswordFinalCheck:
-;;         cmp rsi, 1
-;;         jne validatePasswordExit
-;;         inc word [validPasswords] ; valid password, increment count
-;; validatePasswordExit:
-;;         ret
-
-
 exitError:
         mov rdi, rax            ;errno is in rax
         neg rdi                 ;negate it to get an actual errcode
@@ -565,15 +497,6 @@ newline db 0x0A                 ;newline
 section .bss
         ;; reserve 8 bytes for the memory address of the file we read
 fileContentsAddr:       resb 8
-        ;; Reserve 12 bytes in .bss
-        ;; 1 byte for min-num,
-        ;; 1 byte for max-num
-        ;; 1 byte for the char (byte) to count in pw
-        ;; 1 byte for length of password string
-        ;; 8 bytes for address of password string
-;; ruleMem:        resb 12
-
-
 currentField:   resb 4
 validPassport:  resb 1
         ;; Reserve 2 bytes for counting valid passports
